@@ -39,6 +39,12 @@ local function promptKey()
         os.exit(1)
     end
 
+    if #keys == 1 then
+        print("Only one key was found!")
+        args.key = keys[1]
+        return
+    end
+
     for i, v in ipairs(keys) do
         print("["..i.."]: "..v)
     end
