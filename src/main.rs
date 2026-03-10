@@ -84,6 +84,8 @@ fn main() -> anyhow::Result<()> {
     // TODO: Need to determine if the .ssh directory can be moved
     let ssh_dir = home_dir().unwrap().join(".ssh");
     let disabled_dir = ssh_dir.join("disabled");
+    fs::create_dir_all(&disabled_dir)
+        .context(format!("Failed to create disabled keys directory: {}", &disabled_dir.display()))?;
     let mut tracked_keys = TrackedKeys::load(&tracked_keys_path)?;
 
     // Deactivate current key, if one is active
