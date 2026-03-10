@@ -2,7 +2,7 @@ use std::{env::home_dir, fs, io::{self, Write}};
 
 use clap::Parser;
 use platform_dirs::AppDirs;
-use anyhow::Context;
+use anyhow::{Context, bail};
 use colored::Colorize;
 
 use crate::key::{TrackedKey, TrackedKeys};
@@ -17,8 +17,13 @@ mod key;
     propagate_version = true,
 )]
 struct Cli {
+    /// The partial or complete name of a tracked SSH key
     #[arg()]
     key_name: Option<String>,
+
+    /// Exit non-zero on missing key, rather than prompt for key
+    #[arg(long, short, action)]
+    no_prompt: bool,
 }
 
 fn prompt_for_key(tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
@@ -52,13 +57,17 @@ fn prompt_for_key(tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
     }
 }
 
-fn get_key(key_name: Option<String>, tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
+fn get_key(key_name: Option<String>, no_prompt: bool, tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
     if let Some(key_name) = key_name {
         if let Some(key) = tracked_keys.find_key_by_partial(&key_name) {
             return Ok(key)
         } else {
             println!("{}", "No key found with provided name!".yellow());
         }
+    }
+
+    if no_prompt {
+        bail!("No key found, and no-prompt flag is present")
     }
 
     prompt_for_key(tracked_keys)
@@ -83,7 +92,7 @@ fn main() -> anyhow::Result<()> {
     tracked_keys.save(&tracked_keys_path)?;
 
     // Index any untracked keys and deactivate them as well
-    if tracked_keys.find_untracked_keys(&ssh_dir, &disabled_dir)? {
+    if tracked_keys.find_untracked_keys(cli.no_prompt, &ssh_dir, &disabled_dir)? {
         tracked_keys.save(&tracked_keys_path)?;
     }
 
@@ -97,7 +106,7 @@ fn main() -> anyhow::Result<()> {
         println!("{}", "No SSH keys found.".yellow());
         return Ok(())
     }
-    let key = get_key(cli.key_name, &tracked_keys)?.clone();
+    let key = get_key(cli.key_name, cli.no_prompt, &tracked_keys)?.clone();
     tracked_keys.activate_key(&key, &ssh_dir, &disabled_dir)?;
     tracked_keys.save(&tracked_keys_path)?;
 

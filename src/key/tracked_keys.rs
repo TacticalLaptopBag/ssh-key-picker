@@ -101,7 +101,7 @@ impl TrackedKeys {
         Ok(name.trim().into())
     }
 
-    pub fn find_untracked_keys(&mut self, keys_dir: &PathBuf, disabled_dir: &PathBuf) -> anyhow::Result<bool> {
+    pub fn find_untracked_keys(&mut self, no_prompt: bool, keys_dir: &PathBuf, disabled_dir: &PathBuf) -> anyhow::Result<bool> {
         let files = fs::read_dir(keys_dir)?;
         let mut keys_added = false;
         for entry_result in files {
@@ -118,7 +118,12 @@ impl TrackedKeys {
             if let Some(comment) = comment {
                 println!("  Comment: {}", comment)
             }
-            let name = self.prompt_for_name()?;
+
+            let name = if no_prompt {
+                "".into()
+            } else {
+                self.prompt_for_name()?
+            };
             if name.is_empty() {
                 continue;
             }
