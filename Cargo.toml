@@ -3,6 +3,11 @@ name = "ssh-key-picker"
 version = "0.1.0"
 edition = "2024"
 
+readme = "README.md"
+description = "A simple CLI tool that lets you have exactly 1 SSH key at a time."
+license = "GPL-3.0-only"
+repository = "https://github.com/TacticalLaptopBag/ssh-key-picker"
+
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.5.60", features = ["derive"] }
