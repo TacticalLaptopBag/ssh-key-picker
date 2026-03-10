@@ -1,20 +1,107 @@
-/// Gets the file name stem of the key
-fn key_type_to_stem(key_type: &str) -> Result<String, &'static str> {
-    return match key_type {
-        "ssh-ed25519" => Ok("id_ed25519".into()),
-        "ssh-rsa" => Ok("id_rsa".into()),
-        "ecdsa-sha2-nistp256" |
-            "ecdsa-sha2-nistp384" |
-            "ecdsa-sha2-nistp521" => Ok("id_ecdsa".into()),
-        "ssh-dss" => Ok("id_dsa".into()),
-        "sk-ssh-ed25519@openssh.com" => Ok("id_ed25519_sk".into()),
-        "sk-ecdsa-sha2-nistp256@openssh.com" |
-            "sk-ecdsa-sha2-nistp384@openssh.com" |
-            "sk-ecdsa-sha2-nistp521@openssh.com" => Ok("id_ecdsa_sk".into()),
-        _ => Err("Invalid key type"),
+use std::{env::home_dir, fs, io::{self, Write}};
+
+use clap::Parser;
+use platform_dirs::AppDirs;
+use anyhow::Context;
+use colored::Colorize;
+
+use crate::key::{TrackedKey, TrackedKeys};
+
+mod key;
+
+
+#[derive(Parser)]
+#[command(
+    about = "",
+    version,
+    propagate_version = true,
+)]
+struct Cli {
+    #[arg()]
+    key_name: Option<String>,
+}
+
+fn prompt_for_key(tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
+    println!("Available keys:");
+    for (i, key) in tracked_keys.keys.iter().enumerate() {
+        println!("  {}: {}", i+1, key.name);
+    }
+
+    loop {
+        let mut selection = String::new();
+        let stdin = io::stdin();
+        print!("Select key (number/name): ");
+        io::stdout().flush()?;
+        stdin.read_line(&mut selection)?;
+        selection = selection.trim().into();
+
+        let index_result = selection.parse::<usize>();
+        if let Ok(index) = index_result {
+            if index > 0 && let Some(some_key) = tracked_keys.keys.get(index-1) {
+                return Ok(some_key)
+            } else {
+                println!("{}", "Selection out of range!".yellow());
+            }
+        } else {
+            if let Some(key) = tracked_keys.find_key_by_partial(&selection) {
+                return Ok(key)
+            } else {
+                println!("{}", "Could not find key with that name!".yellow());
+            }
+        }
     }
 }
 
-fn main() {
-    println!("Hello, world!")
+fn get_key(key_name: Option<String>, tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
+    if let Some(key_name) = key_name {
+        if let Some(key) = tracked_keys.find_key_by_partial(&key_name) {
+            return Ok(key)
+        } else {
+            println!("{}", "No key found with provided name!".yellow());
+        }
+    }
+
+    prompt_for_key(tracked_keys)
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let app_dirs = AppDirs::new(Some("ssh-key-picker"), false)
+        .context("Failed to determine data path")?;
+    fs::create_dir_all(&app_dirs.data_dir)
+        .context(format!("Failed to create data directory: {}", &app_dirs.data_dir.display()))?;
+
+    let tracked_keys_path = app_dirs.data_dir.join("keys.json");
+    // TODO: Need to determine if the .ssh directory can be moved
+    let ssh_dir = home_dir().unwrap().join(".ssh");
+    let disabled_dir = ssh_dir.join("disabled");
+    let mut tracked_keys = TrackedKeys::load(&tracked_keys_path)?;
+
+    // Deactivate current key, if one is active
+    let previous_active_key = tracked_keys.get_active_key().cloned();
+    tracked_keys.deactivate_key(&ssh_dir, &disabled_dir)?;
+    tracked_keys.save(&tracked_keys_path)?;
+
+    // Index any untracked keys and deactivate them as well
+    if tracked_keys.find_untracked_keys(&ssh_dir, &disabled_dir)? {
+        tracked_keys.save(&tracked_keys_path)?;
+    }
+
+    // Inform user which key was active
+    if let Some(active_key) = previous_active_key {
+        println!("Disabled previously active key: {}", active_key.name.red());
+    }
+
+    // Select key to activate, or prompt user
+    if tracked_keys.keys.is_empty() {
+        println!("{}", "No SSH keys found.".yellow());
+        return Ok(())
+    }
+    let key = get_key(cli.key_name, &tracked_keys)?.clone();
+    tracked_keys.activate_key(&key, &ssh_dir, &disabled_dir)?;
+    tracked_keys.save(&tracked_keys_path)?;
+
+    println!("Activated key {} as {}", key.name.green(), key.key_type.to_file_name().cyan());
+
+    Ok(())
 }
