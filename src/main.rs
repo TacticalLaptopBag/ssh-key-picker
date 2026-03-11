@@ -10,9 +10,10 @@ use crate::key::{TrackedKey, TrackedKeys};
 mod key;
 
 
+// TODO: Create commands for renaming and removing keys
 #[derive(Parser)]
 #[command(
-    about = "",
+    about,
     version,
     propagate_version = true,
 )]
