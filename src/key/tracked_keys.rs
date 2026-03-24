@@ -1,6 +1,6 @@
 use std::{fs, io::{self, Write}, path::PathBuf};
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::key::{KeyType, TrackedKey};
@@ -10,6 +10,11 @@ use crate::key::{KeyType, TrackedKey};
 pub struct TrackedKeys {
     pub active: Option<String>,
     pub keys: Vec<TrackedKey>,
+
+    #[serde(skip)]
+    keys_dir: PathBuf,
+    #[serde(skip)]
+    disabled_dir: PathBuf,
 }
 
 fn rename_with_context(from: &PathBuf, to: &PathBuf) -> anyhow::Result<()> {
@@ -21,15 +26,22 @@ fn rename_with_context(from: &PathBuf, to: &PathBuf) -> anyhow::Result<()> {
 }
 
 impl TrackedKeys {
-    pub fn load(path: &PathBuf) -> anyhow::Result<TrackedKeys> {
+    pub fn load(path: &PathBuf, keys_dir: PathBuf, disabled_dir: PathBuf) -> anyhow::Result<TrackedKeys> {
         if path.try_exists().is_ok_and(|exists| exists) {
             let data = fs::read_to_string(path)
                 .context("Failed to read keys file")?;
-            let tracked_keys: TrackedKeys = serde_json::from_str(&data)
+            let mut tracked_keys: TrackedKeys = serde_json::from_str(&data)
                 .context("Failed to parse tracked keys")?;
+            tracked_keys.keys_dir = keys_dir;
+            tracked_keys.disabled_dir = disabled_dir;
             Ok(tracked_keys)
         } else {
-            Ok(TrackedKeys { active: None, keys: vec![] })
+            Ok(TrackedKeys {
+                active: None,
+                keys: vec![],
+                keys_dir,
+                disabled_dir,
+            })
         }
     }
 
@@ -61,13 +73,13 @@ impl TrackedKeys {
         self.keys.iter().find(|key| key.name.to_lowercase().starts_with(&partial_name.to_lowercase()))
     }
 
-    pub fn activate_key(&mut self, key: &TrackedKey, keys_dir: &PathBuf, disabled_dir: &PathBuf) -> anyhow::Result<()> {
+    pub fn activate_key(&mut self, key: &TrackedKey) -> anyhow::Result<()> {
         let disabled_name = &key.name;
-        let disabled_path = disabled_dir.join(disabled_name);
+        let disabled_path = self.disabled_dir.join(disabled_name);
         let disabled_pub_path = disabled_path.with_extension("pub");
 
         let private_name = key.key_type.to_file_name();
-        let private_path = keys_dir.join(private_name);
+        let private_path = self.keys_dir.join(private_name);
         let public_path = private_path.with_extension("pub");
 
         rename_with_context(&disabled_path, &private_path)?;
@@ -76,14 +88,14 @@ impl TrackedKeys {
         Ok(())
     }
 
-    pub fn deactivate_key(&mut self, keys_dir: &PathBuf, disabled_dir: &PathBuf) -> anyhow::Result<()> {
+    pub fn deactivate_key(&mut self) -> anyhow::Result<()> {
         if let Some(active_key) = self.get_active_key() {
             let private_name = active_key.key_type.to_file_name();
-            let private_path = keys_dir.join(private_name);
+            let private_path = self.keys_dir.join(private_name);
             let public_path = private_path.with_extension("pub");
             
             let disabled_name = &active_key.name;
-            let disabled_path = disabled_dir.join(disabled_name);
+            let disabled_path = self.disabled_dir.join(disabled_name);
             let disabled_pub_path = disabled_path.with_extension("pub");
 
             rename_with_context(&private_path, &disabled_path)?;
@@ -112,9 +124,9 @@ impl TrackedKeys {
         Ok(name.trim().into())
     }
 
-    pub fn find_untracked_keys(&mut self, no_prompt: bool, keys_dir: &PathBuf, disabled_dir: &PathBuf) -> anyhow::Result<bool> {
-        let files = fs::read_dir(&keys_dir)
-            .context(format!("Failed to read from {}", keys_dir.display()))?;
+    pub fn find_untracked_keys(&mut self, no_prompt: bool) -> anyhow::Result<bool> {
+        let files = fs::read_dir(&self.keys_dir)
+            .context(format!("Failed to read from {}", self.keys_dir.display()))?;
 
         let mut keys_added = false;
         for entry_result in files {
@@ -145,8 +157,8 @@ impl TrackedKeys {
 
             let public_path = entry.path();
             let private_path = entry.path().with_extension("");
-            let disabled_path = disabled_dir.join(&tracked_key.name);
-            let disabled_pub_path = disabled_dir.join(&tracked_key.name).with_extension("pub");
+            let disabled_path = self.disabled_dir.join(&tracked_key.name);
+            let disabled_pub_path = self.disabled_dir.join(&tracked_key.name).with_extension("pub");
             rename_with_context(&public_path, &disabled_pub_path)?;
             rename_with_context(&private_path, &disabled_path)?;
             self.keys.push(tracked_key);
@@ -154,5 +166,30 @@ impl TrackedKeys {
         }
 
         Ok(keys_added)
+    }
+
+    pub fn rename(&mut self, key: &TrackedKey, new_name: String) -> anyhow::Result<()> {
+        let old_name = key.name.clone();
+
+        if self.find_key(&new_name).is_some() {
+            bail!("This name has already been taken!");
+        }
+
+        if let Some(internal_key) = self.keys.iter_mut().find(|k| k.name == old_name) {
+            if self.active.as_deref() == Some(&internal_key.name) {
+                self.active = Some(new_name.clone());
+                // Key is currently active, don't need to rename it
+            } else {
+                let private_name = internal_key.key_type.to_file_name();
+                let private_path = self.disabled_dir.join(private_name);
+                let public_path = private_path.with_extension("pub");
+                rename_with_context(&private_path, &private_path.with_file_name(&new_name))?;
+                rename_with_context(&public_path, &public_path.with_file_name(&new_name))?;
+            }
+            
+            internal_key.name = new_name;
+        }
+
+        Ok(())
     }
 }

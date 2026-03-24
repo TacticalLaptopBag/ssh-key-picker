@@ -10,7 +10,6 @@ use crate::key::{TrackedKey, TrackedKeys};
 mod key;
 
 
-// TODO: Create commands for renaming and removing keys
 #[derive(Parser)]
 #[command(
     about,
@@ -25,6 +24,14 @@ struct Cli {
     /// Exit non-zero on missing key, rather than prompt for key
     #[arg(long, short, action)]
     no_prompt: bool,
+
+    /// Rename the selected key to the provided name
+    #[arg(long, short)]
+    rename: Option<String>,
+
+    /// Delete the selected key
+    #[arg(long, short, action)]
+    delete: bool,
 }
 
 fn prompt_for_key(tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
@@ -76,26 +83,30 @@ fn get_key(key_name: Option<String>, no_prompt: bool, tracked_keys: &TrackedKeys
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if cli.delete && cli.rename.is_some() {
+        bail!("Cannot delete and rename a key at the same time!")
+    }
+
     let app_dirs = AppDirs::new(Some("ssh-key-picker"), false)
         .context("Failed to determine data path")?;
     fs::create_dir_all(&app_dirs.data_dir)
         .context(format!("Failed to create data directory: {}", &app_dirs.data_dir.display()))?;
 
     let tracked_keys_path = app_dirs.data_dir.join("keys.json");
-    // TODO: Need to determine if the .ssh directory can be moved
     let ssh_dir = home_dir().unwrap().join(".ssh");
     let disabled_dir = ssh_dir.join("disabled");
     fs::create_dir_all(&disabled_dir)
         .context(format!("Failed to create disabled keys directory: {}", &disabled_dir.display()))?;
-    let mut tracked_keys = TrackedKeys::load(&tracked_keys_path)?;
+    let mut tracked_keys = TrackedKeys::load(&tracked_keys_path, ssh_dir, disabled_dir)?;
 
     // Deactivate current key, if one is active
     let previous_active_key = tracked_keys.get_active_key().cloned();
-    tracked_keys.deactivate_key(&ssh_dir, &disabled_dir)?;
+    tracked_keys.deactivate_key()?;
     tracked_keys.save(&tracked_keys_path)?;
 
     // Index any untracked keys and deactivate them as well
-    if tracked_keys.find_untracked_keys(cli.no_prompt, &ssh_dir, &disabled_dir)? {
+    if tracked_keys.find_untracked_keys(cli.no_prompt)? {
         tracked_keys.save(&tracked_keys_path)?;
     }
 
@@ -110,10 +121,21 @@ fn main() -> anyhow::Result<()> {
         return Ok(())
     }
     let key = get_key(cli.key_name, cli.no_prompt, &tracked_keys)?.clone();
-    tracked_keys.activate_key(&key, &ssh_dir, &disabled_dir)?;
-    tracked_keys.save(&tracked_keys_path)?;
 
-    println!("Activated key {} as {}", key.name.green(), key.key_type.to_file_name().cyan());
+    let msg: String;
+    if cli.delete {
+        // tracked_keys.delete(&key)?;
+        msg = format!("Deleted key {}", key.name.red());
+    } else if let Some(new_name) = cli.rename {
+        let old_name = key.name.clone();
+        tracked_keys.rename(&key, new_name.clone())?;
+        msg = format!("Renamed key {} to {}", old_name.red(), new_name.green());
+    } else {
+        tracked_keys.activate_key(&key)?;
+        msg = format!("Activated key {} as {}", key.name.green(), key.key_type.to_file_name().cyan());
+    }
+    tracked_keys.save(&tracked_keys_path)?;
+    println!("{}", msg);
 
     Ok(())
 }
