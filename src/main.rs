@@ -100,19 +100,9 @@ fn main() -> anyhow::Result<()> {
         .context(format!("Failed to create disabled keys directory: {}", &disabled_dir.display()))?;
     let mut tracked_keys = TrackedKeys::load(&tracked_keys_path, ssh_dir, disabled_dir)?;
 
-    // Deactivate current key, if one is active
-    let previous_active_key = tracked_keys.get_active_key().cloned();
-    tracked_keys.deactivate_key()?;
-    tracked_keys.save(&tracked_keys_path)?;
-
     // Index any untracked keys and deactivate them as well
     if tracked_keys.find_untracked_keys(cli.no_prompt)? {
         tracked_keys.save(&tracked_keys_path)?;
-    }
-
-    // Inform user which key was active
-    if let Some(active_key) = previous_active_key {
-        println!("Disabled previously active key: {}", active_key.name.red());
     }
 
     // Select key to activate, or prompt user
@@ -124,13 +114,32 @@ fn main() -> anyhow::Result<()> {
 
     let msg: String;
     if cli.delete {
-        // tracked_keys.delete(&key)?;
-        msg = format!("Deleted key {}", key.name.red());
+        let had_active = tracked_keys.active.is_some();
+        let deleted = tracked_keys.delete(&key, cli.no_prompt)?;
+        msg = if deleted {
+            if had_active != tracked_keys.active.is_some() {
+                format!("Deleted {} key {}", "previously active".bold(), key.name.red())
+            } else {
+                format!("Deleted key {}", key.name.red())
+            }
+        } else {
+            format!("{}", "Canceled.".yellow())
+        };
     } else if let Some(new_name) = cli.rename {
         let old_name = key.name.clone();
         tracked_keys.rename(&key, new_name.clone())?;
         msg = format!("Renamed key {} to {}", old_name.red(), new_name.green());
     } else {
+        // Deactivate current key, if one is active
+        let previous_active_key = tracked_keys.get_active_key().cloned();
+        tracked_keys.deactivate_key()?;
+        tracked_keys.save(&tracked_keys_path)?;
+
+        // Inform user which key was active
+        if let Some(active_key) = previous_active_key {
+            println!("Disabled previously active key: {}", active_key.name.red());
+        }
+
         tracked_keys.activate_key(&key)?;
         msg = format!("Activated key {} as {}", key.name.green(), key.key_type.to_file_name().cyan());
     }

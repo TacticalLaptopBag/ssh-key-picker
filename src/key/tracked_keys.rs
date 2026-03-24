@@ -1,7 +1,8 @@
 use std::{fs, io::{self, Write}, path::PathBuf};
 
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use colored::Colorize;
 
 use crate::key::{KeyType, TrackedKey};
 
@@ -22,6 +23,14 @@ fn rename_with_context(from: &PathBuf, to: &PathBuf) -> anyhow::Result<()> {
         .context(format!(
             "Failed to move file from {} to {}",
             from.display(), to.display(),
+        ))
+}
+
+fn remove_file_with_context(file: &PathBuf) -> anyhow::Result<()> {
+    fs::remove_file(file)
+        .context(format!(
+            "Failed to remove file {}",
+            file.display(),
         ))
 }
 
@@ -128,9 +137,18 @@ impl TrackedKeys {
         let files = fs::read_dir(&self.keys_dir)
             .context(format!("Failed to read from {}", self.keys_dir.display()))?;
 
+        let active_key_paths = self.get_active_key().map(|k| k.get_enabled_paths(&self.keys_dir));
+
         let mut keys_added = false;
         for entry_result in files {
             let Ok(entry) = entry_result else { continue };
+            // Check this key isn't the currently active key
+            if let Some(active_paths) = &active_key_paths {
+                if entry.path() == active_paths.private || entry.path() == active_paths.public {
+                    continue;
+                }
+            }
+
             let Ok(contents) = fs::read_to_string(entry.path()) else { continue };
             let contents_split: Vec<&str> = contents.split_whitespace().collect();
             let Some(key_type_str) = contents_split.first() else { continue };
@@ -158,7 +176,7 @@ impl TrackedKeys {
             let public_path = entry.path();
             let private_path = entry.path().with_extension("");
             let disabled_path = self.disabled_dir.join(&tracked_key.name);
-            let disabled_pub_path = self.disabled_dir.join(&tracked_key.name).with_extension("pub");
+            let disabled_pub_path = disabled_path.with_extension("pub");
             rename_with_context(&public_path, &disabled_pub_path)?;
             rename_with_context(&private_path, &disabled_path)?;
             self.keys.push(tracked_key);
@@ -180,16 +198,50 @@ impl TrackedKeys {
                 self.active = Some(new_name.clone());
                 // Key is currently active, don't need to rename it
             } else {
-                let private_name = internal_key.key_type.to_file_name();
-                let private_path = self.disabled_dir.join(private_name);
-                let public_path = private_path.with_extension("pub");
-                rename_with_context(&private_path, &private_path.with_file_name(&new_name))?;
-                rename_with_context(&public_path, &public_path.with_file_name(&new_name))?;
+                let disabled_path = self.disabled_dir.join(&old_name);
+                let disabled_pub_path = disabled_path.with_extension("pub");
+                rename_with_context(&disabled_path, &disabled_path.with_file_name(&new_name))?;
+                rename_with_context(&disabled_pub_path, &disabled_pub_path.with_file_name(&new_name).with_extension("pub"))?;
             }
             
             internal_key.name = new_name;
+        } else {
+            bail!("Provided key is not tracked!")
         }
 
         Ok(())
+    }
+
+    pub fn delete(&mut self, key: &TrackedKey, no_prompt: bool) -> anyhow::Result<bool> {
+        if !no_prompt {
+            let mut response = String::new();
+            print!("Are you sure you want to delete key {}? (y/N): ", key.name.red());
+            io::stdout().flush()?;
+            io::stdin().read_line(&mut response)?;
+            if !response.to_lowercase().starts_with("y") {
+                return Ok(false)
+            }
+        }
+        
+        let key_index = self.keys.iter().position(|k| k.name == key.name).ok_or(anyhow!("Provided key is not tracked!"))?;
+        // key_index must be in keys, so this is a safe unwrap
+        let internal_key = self.keys.get_mut(key_index).unwrap();
+        if self.active.as_ref() == Some(&internal_key.name) {
+            self.active = None;
+
+            let private_name = internal_key.key_type.to_file_name();
+            let private_path = self.keys_dir.join(private_name);
+            let public_path = private_path.with_extension("pub");
+            remove_file_with_context(&private_path)?;
+            remove_file_with_context(&public_path)?;
+        } else {
+            let disabled_path = self.disabled_dir.join(&internal_key.name);
+            let disabled_pub_path = disabled_path.with_extension("pub");
+            remove_file_with_context(&disabled_path)?;
+            remove_file_with_context(&disabled_pub_path)?;
+        }
+
+        self.keys.remove(key_index);
+        Ok(true)
     }
 }
