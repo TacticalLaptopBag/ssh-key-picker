@@ -37,7 +37,12 @@ struct Cli {
 fn prompt_for_key(tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
     println!("Available keys:");
     for (i, key) in tracked_keys.keys.iter().enumerate() {
-        println!("  {}: {}", i+1, key.name);
+        let active_mark = if Some(&key.name) == tracked_keys.active.as_ref() {
+            " (active)".green()
+        } else {
+            "".into()
+        };
+        println!("  {}: {}{}", i+1, key.name, active_mark);
     }
 
     loop {
@@ -130,14 +135,14 @@ fn main() -> anyhow::Result<()> {
         tracked_keys.rename(&key, new_name.clone())?;
         msg = format!("Renamed key {} to {}", old_name.red(), new_name.green());
     } else {
-        // Deactivate current key, if one is active
-        let previous_active_key = tracked_keys.get_active_key().cloned();
-        tracked_keys.deactivate_key()?;
-        tracked_keys.save(&tracked_keys_path)?;
-
-        // Inform user which key was active
-        if let Some(active_key) = previous_active_key {
-            println!("Disabled previously active key: {}", active_key.name.red());
+        if let Some(active_key) = curr_active_key {
+            if active_key.name == key.name {
+                println!("{}", format!("Key {} is already active!", key.name.italic()).yellow());
+                return Ok(())
+            }
+            // Deactivate current key, if one is active
+            tracked_keys.deactivate_key()?;
+            tracked_keys.save(&tracked_keys_path)?;
         }
 
         tracked_keys.activate_key(&key)?;
