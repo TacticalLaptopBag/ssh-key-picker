@@ -11,7 +11,7 @@ pub enum KeyType {
     Ecdsa521(bool),
 }
 
-fn full_key_type(stem: &str, sk: bool) -> String {
+fn _full_key_type(stem: &str, sk: bool) -> String {
     if sk {
         format!("sk-{}@openssh.com", stem)
     } else {
@@ -46,14 +46,14 @@ impl KeyType {
         }
     }
 
-    pub fn to_string_type(&self) -> String {
+    fn _to_string_type(&self) -> String {
         match self {
-            KeyType::Ed25519(sk) => full_key_type("ssh-ed25519", *sk),
-            KeyType::Rsa(sk) => full_key_type("ssh-rsa", *sk),
-            KeyType::Dss(sk) => full_key_type("ssh-dss", *sk),
-            KeyType::Ecdsa256(sk) => full_key_type("ecdsa-ssh2-nistp256", *sk),
-            KeyType::Ecdsa384(sk) => full_key_type("ecdsa-ssh2-nistp384", *sk),
-            KeyType::Ecdsa521(sk) => full_key_type("ecdsa-ssh2-nistp521", *sk),
+            KeyType::Ed25519(sk) => _full_key_type("ssh-ed25519", *sk),
+            KeyType::Rsa(sk) => _full_key_type("ssh-rsa", *sk),
+            KeyType::Dss(sk) => _full_key_type("ssh-dss", *sk),
+            KeyType::Ecdsa256(sk) => _full_key_type("ecdsa-ssh2-nistp256", *sk),
+            KeyType::Ecdsa384(sk) => _full_key_type("ecdsa-ssh2-nistp384", *sk),
+            KeyType::Ecdsa521(sk) => _full_key_type("ecdsa-ssh2-nistp521", *sk),
         }.into()
     }
 
