@@ -83,32 +83,21 @@ impl TrackedKeys {
     }
 
     pub fn activate_key(&mut self, key: &TrackedKey) -> anyhow::Result<()> {
-        let disabled_name = &key.name;
-        let disabled_path = self.disabled_dir.join(disabled_name);
-        let disabled_pub_path = disabled_path.with_extension("pub");
-
-        let private_name = key.key_type.to_file_name();
-        let private_path = self.keys_dir.join(private_name);
-        let public_path = private_path.with_extension("pub");
-
-        rename_with_context(&disabled_path, &private_path)?;
-        rename_with_context(&disabled_pub_path, &public_path)?;
+        let disabled_paths = key.get_disabled_paths(&self.disabled_dir);
+        let enabled_paths = key.get_enabled_paths(&self.keys_dir);
+        rename_with_context(&disabled_paths.private, &enabled_paths.private)?;
+        rename_with_context(&disabled_paths.public, &enabled_paths.public)?;
         self.active = Some(key.name.clone());
         Ok(())
     }
 
     pub fn deactivate_key(&mut self) -> anyhow::Result<()> {
         if let Some(active_key) = self.get_active_key() {
-            let private_name = active_key.key_type.to_file_name();
-            let private_path = self.keys_dir.join(private_name);
-            let public_path = private_path.with_extension("pub");
-            
-            let disabled_name = &active_key.name;
-            let disabled_path = self.disabled_dir.join(disabled_name);
-            let disabled_pub_path = disabled_path.with_extension("pub");
+            let disabled_paths = active_key.get_disabled_paths(&self.disabled_dir);
+            let enabled_paths = active_key.get_enabled_paths(&self.keys_dir);
 
-            rename_with_context(&private_path, &disabled_path)?;
-            rename_with_context(&public_path, &disabled_pub_path)?;
+            rename_with_context(&enabled_paths.private, &disabled_paths.private)?;
+            rename_with_context(&enabled_paths.public, &disabled_paths.public)?;
             self.active = None;
         }
         Ok(())
@@ -173,12 +162,11 @@ impl TrackedKeys {
 
             let tracked_key = TrackedKey { name, key_type };
 
-            let public_path = entry.path();
+            let public_path = entry.path().with_extension("pub");
             let private_path = entry.path().with_extension("");
-            let disabled_path = self.disabled_dir.join(&tracked_key.name);
-            let disabled_pub_path = disabled_path.with_extension("pub");
-            rename_with_context(&public_path, &disabled_pub_path)?;
-            rename_with_context(&private_path, &disabled_path)?;
+            let disabled_paths = tracked_key.get_disabled_paths(&self.disabled_dir);
+            rename_with_context(&private_path, &disabled_paths.private)?;
+            rename_with_context(&public_path, &disabled_paths.public)?;
             self.keys.push(tracked_key);
             keys_added = true;
         }
@@ -200,8 +188,10 @@ impl TrackedKeys {
             } else {
                 let disabled_path = self.disabled_dir.join(&old_name);
                 let disabled_pub_path = disabled_path.with_extension("pub");
-                rename_with_context(&disabled_path, &disabled_path.with_file_name(&new_name))?;
-                rename_with_context(&disabled_pub_path, &disabled_pub_path.with_file_name(&new_name).with_extension("pub"))?;
+                let new_path = disabled_path.with_file_name(&new_name);
+                let new_pub_path = new_path.with_extension("pub");
+                rename_with_context(&disabled_path, &new_path)?;
+                rename_with_context(&disabled_pub_path, &new_pub_path)?;
             }
             
             internal_key.name = new_name;
