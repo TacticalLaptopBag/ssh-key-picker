@@ -115,6 +115,19 @@ fn main() -> anyhow::Result<()> {
         println!("{}", "No SSH keys found.".yellow());
         return Ok(())
     }
+
+    let curr_active_key = tracked_keys.get_active_key();
+    if let Some(active_key) = curr_active_key && tracked_keys.keys.len() == 1 {
+        println!(
+            "{}",
+            format!(
+                "{} is the only tracked key, and it's already active!",
+                active_key.name.italic(),
+            ).yellow(),
+        );
+        return Ok(())
+    }
+
     let key = get_key(cli.key_name, cli.no_prompt, &tracked_keys)?.clone();
 
     let msg: String;
