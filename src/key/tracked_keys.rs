@@ -122,6 +122,85 @@ impl TrackedKeys {
         Ok(name.trim().into())
     }
 
+    fn update_active_state(&mut self) -> anyhow::Result<bool> {
+        let mut dirty = false;
+
+        if let Some(active_key) = self.get_active_key() {
+            let enabled_paths = active_key.get_enabled_paths(&self.keys_dir);
+            let disabled_paths = active_key.get_disabled_paths(&self.disabled_dir);
+            let does_private_exist = fs::exists(&enabled_paths.private)?;
+            let does_public_exist = fs::exists(&enabled_paths.public)?;
+            if !does_private_exist || !does_public_exist {
+                // Private or public active key is missing. Did we try to disable it?
+                let is_private_disabled = fs::exists(&disabled_paths.private)?;
+                let is_public_disabled = fs::exists(&disabled_paths.public)?;
+                if does_private_exist && !is_private_disabled {
+                    rename_with_context(&enabled_paths.private, &disabled_paths.private)?;
+                }
+                if does_public_exist && !is_public_disabled {
+                    rename_with_context(&enabled_paths.public, &disabled_paths.public)?;
+                }
+
+                self.active = None;
+                dirty = true;
+            }
+        }
+
+        Ok(dirty)
+    }
+
+    fn update_tracked_keys(&mut self) -> anyhow::Result<bool> {
+        let mut dirty = false;
+
+        let mut keys_to_remove = vec![];
+        for (i, key) in self.keys.iter().enumerate() {
+            if Some(&key.name) == self.active.as_ref() {
+                continue;
+            }
+            let disabled_paths = key.get_disabled_paths(&self.disabled_dir);
+            let does_private_exist = fs::exists(&disabled_paths.private)?;
+            let does_public_exist = fs::exists(&disabled_paths.public)?;
+            let lost_and_found_dir = self.disabled_dir.parent()
+                .ok_or(anyhow!("Disabled keys directory is in an invalid location!"))?
+                .join("lost-and-found");
+            if !does_private_exist || !does_public_exist {
+                println!("{}", format!("Tracked key {} appears to be missing!", key.name.red()).bold());
+                println!("This key will be removed from the list of tracked keys.");
+                if does_private_exist || does_public_exist {
+                    fs::create_dir_all(&lost_and_found_dir)
+                        .context(format!("Failed to create directory {}", lost_and_found_dir.display()))?;
+                    println!(
+                        "Remnants of this key were found, and will be moved to {}",
+                        lost_and_found_dir.display().to_string().red(),
+                    )
+                }
+                
+                if does_private_exist {
+                    rename_with_context(&disabled_paths.private, &lost_and_found_dir.join(&key.name))?;
+                }
+                if does_public_exist {
+                    rename_with_context(&disabled_paths.public, &lost_and_found_dir.join(&key.name).with_extension("pub"))?;
+                }
+
+                keys_to_remove.push(i);
+                dirty = true;
+            }
+        }
+
+        for i in keys_to_remove {
+            self.keys.remove(i);
+        }
+
+        Ok(dirty)
+    }
+
+    /// Checks actual locations of key files and updates the internal state to reflect them
+    pub fn update_state(&mut self) -> anyhow::Result<bool> {
+        let mut changes_made = self.update_active_state()?;
+        changes_made = changes_made || self.update_tracked_keys()?;
+        Ok(changes_made)
+    }
+
     pub fn find_untracked_keys(&mut self, no_prompt: bool) -> anyhow::Result<bool> {
         let files = fs::read_dir(&self.keys_dir)
             .context(format!("Failed to read from {}", self.keys_dir.display()))?;

@@ -105,6 +105,10 @@ fn main() -> anyhow::Result<()> {
         .context(format!("Failed to create disabled keys directory: {}", &disabled_dir.display()))?;
     let mut tracked_keys = TrackedKeys::load(&tracked_keys_path, ssh_dir, disabled_dir)?;
 
+    if tracked_keys.update_state()? {
+        tracked_keys.save(&tracked_keys_path)?;
+    }
+
     // Index any untracked keys and deactivate them as well
     if tracked_keys.find_untracked_keys(cli.no_prompt)? {
         tracked_keys.save(&tracked_keys_path)?;
