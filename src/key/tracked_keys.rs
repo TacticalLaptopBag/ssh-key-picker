@@ -197,7 +197,7 @@ impl TrackedKeys {
     /// Checks actual locations of key files and updates the internal state to reflect them
     pub fn update_state(&mut self) -> anyhow::Result<bool> {
         let mut changes_made = self.update_active_state()?;
-        changes_made = changes_made || self.update_tracked_keys()?;
+        changes_made = self.update_tracked_keys()? || changes_made;
         Ok(changes_made)
     }
 
