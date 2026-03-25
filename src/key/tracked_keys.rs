@@ -224,9 +224,8 @@ impl TrackedKeys {
             let Ok(key_type) = KeyType::from_type(key_type_str) else { continue };
             // This seems to be a valid key, prompt user for name
             println!("Found untracked key: {}", entry.path().display());
-            // TODO: Get slice from 2 to end
-            let comment = contents_split.get(2);
-            if let Some(comment) = comment {
+            let comment = contents_split.get(2..).map(|s| s.join(" ")).filter(|s| !s.is_empty());
+            if let Some(ref comment) = comment {
                 println!("  Comment: {}", comment)
             }
 
