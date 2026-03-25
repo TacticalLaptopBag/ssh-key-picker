@@ -52,6 +52,10 @@ fn prompt_for_key(tracked_keys: &TrackedKeys) -> anyhow::Result<&TrackedKey> {
         io::stdout().flush()?;
         stdin.read_line(&mut selection)?;
         selection = selection.trim().into();
+        if selection.is_empty() {
+            println!("{}", "You must make a selection, or press CTRL+C to cancel.".yellow());
+            continue;
+        }
 
         let index_result = selection.parse::<usize>();
         if let Ok(index) = index_result {
