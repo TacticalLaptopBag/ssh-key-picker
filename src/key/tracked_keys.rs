@@ -216,6 +216,9 @@ impl TrackedKeys {
                     continue;
                 }
             }
+            if entry.file_name() == "authorized_keys" {
+                continue;
+            }
 
             let Ok(contents) = fs::read_to_string(entry.path()) else { continue };
             let contents_split: Vec<&str> = contents.split_whitespace().collect();
